@@ -5,10 +5,7 @@ from PIL import Image
 import cv2
 import torch
 from swapper import getFaceSwapModel, getFaceAnalyser, get_many_faces, swap_face
-
-# Ensure the correct import path for CodeFormer
-from codeformer.app import CodeFormer
-
+from codeformer.app import inference_app
 
 def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
     # Save the uploaded files
@@ -44,15 +41,12 @@ def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # Initialize InSwapper and CodeFormer if needed
+    # Initialize InSwapper if needed
     if apply_faceswap:
         model_path = "./checkpoints/inswapper_128.onnx"
         face_swapper = getFaceSwapModel(model_path)
         providers = onnxruntime.get_available_providers()
         face_analyser = getFaceAnalyser(model_path, providers)
-    
-    if apply_codeformer:
-        codeformer = CodeFormer()
     
     # Load the reference image for face swapping if needed
     if apply_faceswap:
@@ -88,7 +82,15 @@ def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
         
         if apply_codeformer:
             # Enhance the frame using CodeFormer
-            frame = codeformer.enhance(frame)
+            frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            enhanced_frame_pil = inference_app(
+                image=frame_pil,
+                background_enhance=True,
+                face_upsample=True,
+                upscale=1,
+                codeformer_fidelity=0.5
+            )
+            frame = cv2.cvtColor(np.array(enhanced_frame_pil), cv2.COLOR_RGB2BGR)
         
         processed_frames.append(frame)
     
