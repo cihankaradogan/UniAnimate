@@ -7,10 +7,7 @@ ddim_timesteps: 30  # among 25-50
 seed: 11 # 7
 test_list_path: [
     # Format: [frame_interval, reference image, driving pose sequence]
-    [2, "data/images/WOMEN-Blouses_Shirts-id_00004955-01_4_full.jpg", "data/saved_pose/WOMEN-Blouses_Shirts-id_00004955-01_4_full"],
-    [2, "data/images/musk.jpg", "data/saved_pose/musk"],
-    [2, "data/images/WOMEN-Blouses_Shirts-id_00005125-03_4_full.jpg", "data/saved_pose/WOMEN-Blouses_Shirts-id_00005125-03_4_full"],
-    [2, "data/images/IMG_20240514_104337.jpg", "data/saved_pose/IMG_20240514_104337"]
+    [2, "data/images/ref_image.jpg", "data/saved_pose/ref_image"]
 ]
 partial_keys: [
                     ['image','local_image', "dwpose"], # reference image as the first frame of the generated video (optional)
