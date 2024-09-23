@@ -5,7 +5,10 @@ from PIL import Image
 import cv2
 import torch
 from swapper import getFaceSwapModel, getFaceAnalyser, get_many_faces, swap_face
-from codeformer import CodeFormer
+
+# Ensure the correct import path for CodeFormer
+from codeformer.app import CodeFormer
+
 
 def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
     # Save the uploaded files
