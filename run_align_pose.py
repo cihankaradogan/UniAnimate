@@ -173,13 +173,33 @@ def draw_pose(pose, H, W):
     subset = bodies['subset']
     canvas = np.zeros(shape=(H, W, 3), dtype=np.uint8)
 
-    canvas = util.draw_body_and_foot(canvas, candidate, subset)
+    # Add error handling for NaN values
+    valid_candidate = np.isfinite(candidate).all(axis=1)
+    valid_faces = np.isfinite(faces).all(axis=(1, 2))
+    valid_hands = np.isfinite(hands).all(axis=(1, 2))
 
-    canvas = util.draw_handpose(canvas, hands)
+    # Print debugging information
+    print(f"Shape of candidate: {candidate.shape}")
+    print(f"Shape of subset: {subset.shape}")
+    print(f"Shape of valid_candidate: {valid_candidate.shape}")
 
+    # Adjust subset to match valid_candidate
+    valid_subset = subset.copy()
+    if valid_subset.shape[1] == valid_candidate.shape[0]:
+        valid_subset[:, ~valid_candidate] = -1
+    else:
+        print("Warning: shapes of valid_candidate and subset do not match as expected.")
+        # You might want to add additional handling here
+
+    # Draw body and foot only for valid candidates
+    canvas = util.draw_body_and_foot(canvas, candidate, valid_subset)
+
+    # Draw hands and face
+    if valid_hands.any():
+        canvas = util.draw_handpose(canvas, hands[valid_hands])
     canvas_without_face = copy.deepcopy(canvas)
-
-    canvas = util.draw_facepose(canvas, faces)
+    if valid_faces.any():
+        canvas = util.draw_facepose(canvas, faces[valid_faces])
 
     return canvas_without_face, canvas
 
@@ -190,6 +210,36 @@ def dw_func(_id, frame, dwpose_model, dwpose_woface_folder='tmp_dwpose_wo_face',
 
     return pose
 
+def handle_nan_values(results_vis):
+    last_good_values = None
+    for i in range(len(results_vis)):
+        current_frame = results_vis[i]
+        
+        if last_good_values is None:
+            # Initialize last_good_values with the first non-NaN frame
+            if not (np.isnan(current_frame['bodies']['candidate']).any() or 
+                    np.isnan(current_frame['faces']).any() or 
+                    np.isnan(current_frame['hands']).any()):
+                last_good_values = copy.deepcopy(current_frame)
+            continue
+        
+        # Replace NaN values with last known good values
+        nan_mask = np.isnan(current_frame['bodies']['candidate'])
+        current_frame['bodies']['candidate'][nan_mask] = last_good_values['bodies']['candidate'][nan_mask]
+        
+        nan_mask = np.isnan(current_frame['faces'])
+        current_frame['faces'][nan_mask] = last_good_values['faces'][nan_mask]
+        
+        nan_mask = np.isnan(current_frame['hands'])
+        current_frame['hands'][nan_mask] = last_good_values['hands'][nan_mask]
+        
+        # Update last_good_values if current frame is good
+        if not (np.isnan(current_frame['bodies']['candidate']).any() or 
+                np.isnan(current_frame['faces']).any() or 
+                np.isnan(current_frame['hands']).any()):
+            last_good_values = copy.deepcopy(current_frame)
+    
+    return results_vis
 
 def mp_main(args):
     
@@ -685,14 +735,17 @@ def mp_main(args):
         results_vis[i]['faces'] += offset[np.newaxis, np.newaxis, :]
         results_vis[i]['hands'] += offset[np.newaxis, np.newaxis, :]
     
-    for i in range(len(results_vis)):
-        dwpose_woface, dwpose_wface = draw_pose(results_vis[i], H=768, W=512)
-        img_path = save_motion+'/' + str(i).zfill(4) + '.jpg'
-        cv2.imwrite(img_path, dwpose_woface)
+    # After all the pose processing, before drawing
+    results_vis = handle_nan_values(results_vis)
     
-    dwpose_woface, dwpose_wface = draw_pose(pose_ref, H=768, W=512)
+    for i in range(len(results_vis)):
+        _, dwpose_wface = draw_pose(results_vis[i], H=768, W=512)
+        img_path = save_motion+'/' + str(i).zfill(4) + '.jpg'
+        cv2.imwrite(img_path, dwpose_wface)
+    
+    _, dwpose_wface = draw_pose(pose_ref, H=768, W=512)
     img_path = save_warp+'/' + 'ref_pose.jpg'
-    cv2.imwrite(img_path, dwpose_woface)
+    cv2.imwrite(img_path, dwpose_wface)
 
 
 logger = get_logger('dw pose extraction')
