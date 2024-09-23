@@ -2,21 +2,21 @@ import gradio as gr
 import subprocess
 import os
 from PIL import Image
-import cv2
 import torch
 from swapper import getFaceSwapModel, getFaceAnalyser, get_many_faces, swap_face
 from codeformer.app import inference_app
+import onnxruntime
+import numpy as np
+import copy  # Import the copy module
+import imageio
 
-def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
-    # Save the uploaded files
+def generate_video(ref_image, source_video_path, apply_faceswap, apply_codeformer):
+    gr.Info("Saving the uploaded files...")
     ref_image_path = "data/images/ref_image.jpg"
-    source_video_path = "data/videos/source_video.mp4"
     os.makedirs(os.path.dirname(ref_image_path), exist_ok=True)
-    os.makedirs(os.path.dirname(source_video_path), exist_ok=True)
     ref_image.save(ref_image_path)
-    source_video.save(source_video_path)
     
-    # Run the pose alignment script
+    gr.Info("Running the pose alignment script...")
     saved_pose_dir = "data/saved_pose/ref_image"
     os.makedirs(saved_pose_dir, exist_ok=True)
     subprocess.run([
@@ -26,50 +26,46 @@ def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
         "--saved_pose_dir", saved_pose_dir
     ])
     
-    # Run the UniAnimate model to generate the video
-    output_video_path = "output/generated_video.mp4"
-    os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
+    gr.Info("Running the UniAnimate model to generate the video...")
     subprocess.run([
         "python", "inference.py",
         "--cfg", "configs/UniAnimate_infer.yaml"
     ])
     
-    # Load the generated video
-    cap = cv2.VideoCapture(output_video_path)
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    generated_video_path = "./outputs/UniAnimate_infer/rank_01_00_00_seed_11_image_local_image_dwpose_ref_image_768x512.mp4"
     
-    # Initialize InSwapper if needed
+    if not apply_faceswap and not apply_codeformer:
+        gr.Info("Returning the original generated video.")
+        return generated_video_path
+    
+    gr.Info("Loading the generated video...")
+    reader = imageio.get_reader(generated_video_path, 'ffmpeg')
+    fps = reader.get_meta_data()['fps']
+    
     if apply_faceswap:
+        gr.Info("Initializing InSwapper...")
         model_path = "./checkpoints/inswapper_128.onnx"
         face_swapper = getFaceSwapModel(model_path)
         providers = onnxruntime.get_available_providers()
         face_analyser = getFaceAnalyser(model_path, providers)
     
-    # Load the reference image for face swapping if needed
     if apply_faceswap:
-        ref_image_cv2 = cv2.cvtColor(np.array(ref_image), cv2.COLOR_RGB2BGR)
+        gr.Info("Loading the reference image for face swapping...")
+        ref_image_cv2 = np.array(ref_image.convert("RGB"))
         ref_faces = get_many_faces(face_analyser, ref_image_cv2)
     
-    # Process each frame
+    gr.Info("Processing each frame...")
     processed_frames = []
-    for _ in range(frame_count):
-        ret, frame = cap.read()
-        if not ret:
-            break
+    for frame in reader:
+        frame = np.array(frame)
         
         if apply_faceswap:
-            # Detect faces in the current frame
             target_faces = get_many_faces(face_analyser, frame)
-            
             if target_faces is not None:
                 temp_frame = copy.deepcopy(frame)
                 for i in range(len(target_faces)):
                     if ref_faces is None:
-                        raise Exception("No reference faces found!")
-                    
+                        raise gr.Error("No reference faces found!")
                     temp_frame = swap_face(
                         face_swapper,
                         ref_faces,
@@ -81,8 +77,7 @@ def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
                 frame = temp_frame
         
         if apply_codeformer:
-            # Enhance the frame using CodeFormer
-            frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            frame_pil = Image.fromarray(frame)
             enhanced_frame_pil = inference_app(
                 image=frame_pil,
                 background_enhance=True,
@@ -90,33 +85,34 @@ def generate_video(ref_image, source_video, apply_faceswap, apply_codeformer):
                 upscale=1,
                 codeformer_fidelity=0.5
             )
-            frame = cv2.cvtColor(np.array(enhanced_frame_pil), cv2.COLOR_RGB2BGR)
+            frame = np.array(enhanced_frame_pil)
         
         processed_frames.append(frame)
     
-    cap.release()
+    reader.close()
     
-    # Save the processed frames as a new video
-    output_processed_video_path = "output/processed_generated_video.mp4"
-    out = cv2.VideoWriter(output_processed_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
+    gr.Info("Saving the processed frames as a new video...")
+    output_processed_video_path = "outputs/processed_generated_video.mp4"
+    writer = imageio.get_writer(output_processed_video_path, fps=fps, codec='libx264', quality=8)
     for frame in processed_frames:
-        out.write(frame)
-    out.release()
+        writer.append_data(frame)
+    writer.close()
     
+    gr.Info("Video processing complete.")
     return output_processed_video_path
 
 # Create the Gradio interface
 iface = gr.Interface(
     fn=generate_video,
     inputs=[
-        gr.inputs.Image(type="file", label="Reference Image"),
-        gr.inputs.Video(type="file", label="Source Video"),
-        gr.inputs.Checkbox(label="Apply Face Swap"),
-        gr.inputs.Checkbox(label="Apply CodeFormer Enhancement")
+        gr.Image(type="pil", label="Reference Image"),
+        gr.Video(label="Source Video"),
+        gr.Checkbox(label="Apply Face Swap"),
+        gr.Checkbox(label="Apply CodeFormer Enhancement")
     ],
-    outputs=gr.outputs.Video(label="Generated Video"),
+    outputs=gr.Video(label="Generated Video"),
     title="UniAnimate Video Generation",
-    description="Upload a reference image and a source video to generate an animated video using UniAnimate."
+    description="Reference Image and Source Video should be portrait size and resolution should be divisable by 64!"
 )
 
 # Launch the interface

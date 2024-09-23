@@ -179,9 +179,9 @@ def draw_pose(pose, H, W):
     valid_hands = np.isfinite(hands).all(axis=(1, 2))
 
     # Print debugging information
-    print(f"Shape of candidate: {candidate.shape}")
-    print(f"Shape of subset: {subset.shape}")
-    print(f"Shape of valid_candidate: {valid_candidate.shape}")
+    #print(f"Shape of candidate: {candidate.shape}")
+    #print(f"Shape of subset: {subset.shape}")
+    #print(f"Shape of valid_candidate: {valid_candidate.shape}")
 
     # Adjust subset to match valid_candidate
     valid_subset = subset.copy()
